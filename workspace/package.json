@@ -7,11 +7,14 @@
   "scripts": {
     "start": "node src/server.js",
     "notifier": "node notifier/server.js",
+    "archiver": "node archiver/server.js",
     "demo:notifier": "node notifier/demo.mjs",
+    "demo:archiver": "node archiver/demo.mjs",
     "test": "node --test test/",
     "test:e2e": "node scripts/e2e.mjs",
     "test:e2e:packages": "node scripts/e2e-packages.mjs",
-    "test:notifier": "node notifier/e2e.mjs"
+    "test:notifier": "node notifier/e2e.mjs",
+    "test:archiver": "node archiver/e2e.mjs"
   },
   "engines": {
     "node": ">=20"

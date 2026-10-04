@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>证据归档与冲突核验 · 离线作业包</title>
+<style>
+  :root {
+    --bg: #0f141b; --panel: #171e28; --panel2: #1d2632; --line: #2a3543;
+    --text: #e6edf3; --muted: #8b9aa8; --accent: #4ea1ff; --accent2: #2d4a6e;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --pend: #8b9aa8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 1px 9px; }
+  .meta { margin-left: auto; display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); }
+  button { background: var(--accent2); color: var(--text); border: 1px solid #3d5f87; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #38597e; }
+  button.ghost { background: transparent; border-color: var(--line); color: var(--muted); }
+  button.small { padding: 2px 8px; font-size: 11px; }
+  input, select, textarea { background: #0c1117; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; width: 100%; font-family: inherit; }
+  textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
+  label { display: block; font-size: 11px; color: var(--muted); margin: 8px 0 3px; }
+  .layout { display: grid; grid-template-columns: 400px 1fr; gap: 14px; padding: 14px 20px; align-items: start; }
+  .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .card h2 { font-size: 13px; margin: 0 0 4px; font-weight: 600; }
+  .hint { color: var(--muted); font-size: 11px; margin: 0 0 10px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 2px 0; }
+  .kv .k { color: var(--muted); }
+  code, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
+  .mono.small { font-size: 10.5px; word-break: break-all; color: #b8c6d4; }
+  .badge { display: inline-block; border-radius: 9px; padding: 0 8px; font-size: 10.5px; font-weight: 600; }
+  .b-ok { background: rgba(63,185,80,.15); color: var(--ok); }
+  .b-warn { background: rgba(210,153,34,.15); color: var(--warn); }
+  .b-err { background: rgba(248,81,73,.15); color: var(--err); }
+  .b-pend { background: rgba(139,154,168,.15); color: var(--pend); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { background: var(--panel2); }
+  tr.selected td { background: var(--panel2); }
+  .banner { display: none; padding: 10px 20px; font-size: 12px; }
+  .banner.show { display: block; }
+  .banner.quarantine { background: rgba(248,81,73,.12); color: var(--err); border-bottom: 1px solid var(--err); }
+  .result { margin-top: 8px; padding: 8px; border-radius: 6px; background: #0c1117; border: 1px solid var(--line); font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; }
+  .result.err { border-color: var(--err); color: var(--err); }
+  .result.ok { border-color: var(--ok); }
+  .muted { color: var(--muted); }
+  .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tabs button.on { background: var(--accent); color: #06121f; }
+</style>
+</head>
+<body>
+<header>
+  <h1>证据归档与冲突核验</h1>
+  <span class="tag">现场网关离线作业包</span>
+  <span class="tag">独立模块</span>
+  <div class="meta">
+    <span id="modeBadge" class="badge b-pend">…</span>
+    <button class="ghost small" onclick="refreshAll()">刷新</button>
+  </div>
+</header>
+<div id="quarantineBanner" class="banner quarantine"></div>
+
+<div class="layout">
+  <div class="col">
+    <div class="card">
+      <h2>① 证据签名密钥</h2>
+      <p class="hint">证据包须由已登记密钥签名（Ed25519，规范化 JSON）。私钥只存 sidecar（0600），链上与页面只有公钥。</p>
+      <div class="row">
+        <button onclick="rotateKey()">轮换生成新密钥</button>
+        <button class="ghost" onclick="loadKeys()">刷新公钥列表</button>
+      </div>
+      <div id="keys"></div>
+    </div>
+
+    <div class="card">
+      <h2>② 导入证据包</h2>
+      <p class="hint">断网期间各网关导出的带签名证据包（清单 + 围栏变更 + 分段回执 + 检查点）。可生成演示包或直接粘贴 JSON。</p>
+      <label>演示场景</label>
+      <div class="row">
+        <select id="demoScenario">
+          <option value="valid">有效证据包（围栏1，分段1-2，检查点）</option>
+          <option value="partial">部分进度（分段1：序号1-2）</option>
+          <option value="continuation">续传分段（分段2：序号3-4）</option>
+          <option value="fence2">第二围栏续传（移交后 fence 2）</option>
+          <option value="conflict">冲突分段（同围栏同分段号不同内容）</option>
+        </select>
+        <select id="demoTamper">
+          <option value="">不篡改</option>
+          <option value="signature">篡改签名</option>
+          <option value="chain">篡改哈希链</option>
+          <option value="digest">篡改分段摘要</option>
+          <option value="manifest">篡改清单哈希</option>
+        </select>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="demoPackageId" placeholder="packageId（默认 PKG-DEMO-1）">
+        <input id="demoGatewayId" placeholder="gatewayId（默认 gw-alpha）">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button onclick="genDemo()">生成演示证据包</button>
+        <button class="ghost" onclick="importBundle()">导入下方证据包</button>
+      </div>
+      <label>证据包 JSON（uploadSecret 仅用于核验，归档前脱敏，页面不展示）</label>
+      <textarea id="bundleJson" rows="8" placeholder='{"format":"dr-package-evidence/v1", ...}'></textarea>
+      <div id="importResult"></div>
+    </div>
+
+    <div class="card">
+      <h2>③ 冲突隔离区</h2>
+      <p class="hint">同围栏同分段号出现不同内容时进入隔离；已保存证据永不覆盖，双方均保留可查。</p>
+      <div id="conflicts"></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="card">
+      <h2>④ 归档列表（按 packageId）</h2>
+      <div id="packages"></div>
+    </div>
+
+    <div class="card" id="detailCard" style="display:none">
+      <h2>⑤ 归档详情 · <span id="detailPkg" class="mono"></span></h2>
+      <div class="tabs">
+        <button id="tabTimeline" class="on" onclick="showTab('timeline')">时间线</button>
+        <button id="tabReceipts" onclick="showTab('receipts')">回执</button>
+        <button id="tabReport" onclick="showTab('report')">核验报告</button>
+      </div>
+      <div id="detailSummary"></div>
+      <div id="tabBodyTimeline"></div>
+      <div id="tabBodyReceipts" style="display:none"></div>
+      <div id="tabBodyReport" style="display:none">
+        <div class="row" style="margin-bottom:8px">
+          <button class="small" onclick="downloadReport('text')">下载文本报告</button>
+          <button class="small ghost" onclick="downloadReport('json')">下载 JSON 报告</button>
+        </div>
+        <div id="reportView" class="result" style="max-height:420px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

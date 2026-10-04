@@ -16,9 +16,10 @@ npm start                 # http://localhost:8080
 ```
 
 - 设备执行页面（运营台）：http://localhost:8080/
-- 自动化测试：`npm test`（69 个领域/恢复单测，含 12 个通知投递契约、11 个履约异议契约、19 个离线作业包契约）
+- 自动化测试：`npm test`（86 个领域/恢复单测，含 12 个通知投递契约、11 个履约异议契约、19 个离线作业包契约、17 个证据归档契约）
 - 端到端场景：先 `npm start`，再 `npm run test:e2e`（38 项 HTTP 断言）
 - 离线作业包端到端：`npm run test:e2e:packages`（37 项 HTTP 断言，覆盖过期/重复设备/旧围栏/乱序/重试/移交竞争/恢复续传）
+- 证据归档端到端：`npm run test:archiver`（45 项 HTTP 断言，覆盖篡改拒绝/幂等/冲突隔离/多围栏合并/重启/脱敏）
 
 ## 聚合商通知投递模块（独立服务，`notifier/`）
 
@@ -99,6 +100,30 @@ npm run test:notifier     # 24 项真实 HTTP 端到端断言
 ```bash
 npm run test:e2e:packages   # 37 项真实 HTTP 断言
 ```
+
+## 证据归档与冲突核验模块（独立服务，`archiver/`）
+
+断网期间多个网关各自保存同一作业包的证据（清单 / 围栏变更 / 分段回执 / 检查点），
+恢复联网后运营人员通过网页或 HTTP 导入**带签名证据包**；模块校验**规范化签名与哈希链**
+后按 `packageId` 归档，生成**可阅读、可下载**的核验报告：
+
+- 校验管线任一失败即整体拒绝并留审计：结构 → Ed25519 签名 → 哈希链 → 清单哈希/签发签名 →
+  分段 HMAC 摘要 → 检查点令牌 → 围栏单调性（`EVIDENCE_SIGNATURE_INVALID` /
+  `EVIDENCE_CHAIN_BROKEN` / `DIGEST_MISMATCH` 等明确拒绝码）。
+- **重复导入同一证据只返回原归档回执**（bundleHash 幂等）；**同围栏同分段号不同内容进入
+  冲突隔离**，已保存证据永不覆盖，双方均保留可查。
+- 报告按围栏与分段序号给出**确定时间线**；多围栏按规则合并——当前进度只统计当前围栏，
+  旧围栏证据可查但不计入，合并检查点**单调不倒退**。
+- 归档落盘 `data/evidence/`，**进程重启后报告摘要与冲突列表逐字节不变**；
+  页面、日志与导出报告**不含 uploadSecret / 私钥 / 未脱敏凭据**（归档前脱敏为 secretHash）。
+
+```bash
+npm run archiver          # 归档服务 + 归档台 → http://localhost:8092/
+npm run demo:archiver     # 一键演示 7 个场景
+npm run test:archiver     # 45 项真实 HTTP 端到端断言（含真实重启）
+```
+
+详见 [`archiver/README.md`](archiver/README.md)。
 
 ## 重启恢复契约（日志损坏 / 断电残尾）
 
@@ -227,10 +252,13 @@ src/
   clock.js        仿真时钟
   util.js         时间区间、规范化 JSON、哈希
 public/           运营台（index.html + app.js，含隔离/残尾恢复横幅、履约异议面板、离线作业包面板）
+archiver/         证据归档与冲突核验模块（独立服务 8092：校验管线/冲突隔离/核验报告/归档台）
 test/kernel.test.js   14 个领域单测（node:test）
 test/dispute.test.js  11 个履约异议单测（受理/幂等/材料顺序/终态/重启/投递映射）
 test/package.test.js  18 个离线作业包单测（围栏/乱序合并/幂等/拒绝码/释放移交/过期/重放）
+test/archiver.test.js 17 个证据归档单测（验签/哈希链/幂等/冲突隔离/多围栏合并/重放/脱敏）
 test/recovery.test.js 14 个恢复契约单测（残尾/篡改/断链/503 边界/重启续链/包状态重建，含真实 HTTP）
 scripts/e2e.mjs       38 项 HTTP 端到端断言
 scripts/e2e-packages.mjs 37 项离线作业包 HTTP 断言（过期/重复设备/旧围栏/乱序/重试/移交竞争/撤销）
+archiver/e2e.mjs      45 项证据归档 HTTP 断言（篡改拒绝/幂等/冲突隔离/多围栏合并/重启/脱敏）
 ```
