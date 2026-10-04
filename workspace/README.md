@@ -16,9 +16,11 @@ npm start                 # http://localhost:8080
 ```
 
 - 设备执行页面（运营台）：http://localhost:8080/
-- 自动化测试：`npm test`（69 个领域/恢复单测，含 12 个通知投递契约、11 个履约异议契约、19 个离线作业包契约）
+- 自动化测试：`npm test`（91 个领域/恢复单测，含 12 个通知投递契约、11 个履约异议契约、
+  19 个离线作业包契约、22 个证据归档契约）
 - 端到端场景：先 `npm start`，再 `npm run test:e2e`（38 项 HTTP 断言）
 - 离线作业包端到端：`npm run test:e2e:packages`（37 项 HTTP 断言，覆盖过期/重复设备/旧围栏/乱序/重试/移交竞争/恢复续传）
+- **证据归档与冲突核验端到端**：`npm run test:e2e:evidence`（83 项 HTTP 断言，含真实进程重启与脱敏核对）
 
 ## 聚合商通知投递模块（独立服务，`notifier/`）
 
@@ -99,6 +101,37 @@ npm run test:notifier     # 24 项真实 HTTP 端到端断言
 ```bash
 npm run test:e2e:packages   # 37 项真实 HTTP 断言
 ```
+
+## 证据归档与冲突核验模块（独立服务，`evidence/`，端口 8092）
+
+断网期间多个网关各自保存同一作业包的清单、围栏变更、分段回执和检查点；运营人员通过网页或 HTTP
+导入**带 Ed25519 签名的证据信封**，模块校验规范化哈希与签名后按 `packageId` 归档，生成
+可阅读、可下载（TXT/JSON/HTML，**全部脱敏**）的核验报告。
+
+```bash
+npm run evidence              # 归档服务 + 页面 → http://localhost:8092/
+npm run demo:evidence         # 9 个故障/合并场景一键演示
+npm run test:e2e:evidence     # 83 项真实 HTTP 断言（含真实进程重启）
+```
+
+- **证据信封**：`envelopeHash = sha256(canonicalJSON({schema,packageId,gatewayId,keyId,records}))`，
+  Ed25519（网关私钥）对该哈希签名；服务只保存网关公钥注册表，**从不接收私钥**
+  （注册接口遇 PEM 私钥即 `PRIVATE_KEY_REJECTED`）；导入需 `X-Upload-Secret`（sidecar 0600，
+  常量时间比较，页面/日志/导出永不回显）。校验顺序：结构白名单 → 信封哈希 → **验签先于查重**
+  → 业务规则 → 槽位裁决。
+- **重复导入幂等**：同一 `envelopeHash` 永远返回首次裁决原结果（同 `importId`/时间/disposition），
+  链上不追加、报告摘要不变。
+- **冲突隔离，绝不覆盖**：槽位（清单 / `围栏:版本` / `围栏版本:分段号` / 检查点）已有**异语义指纹**时，
+  外来原证据进入 `quarantine.jsonl`（保留外来+已存双指纹），已存证据原样保留；
+  报告中该分段仍展示首次归档内容。检查点跨围栏**不倒退**（低水位 `CHECKPOINT_REGRESSED` 隔离）。
+- **确定性时间线 + 多围栏合并**：按围栏版本/分段号确定排序；当前围栏为最高版本，旧围栏证据
+  可按版本查询但显式标注“不得作为当前进度”；新高版本围栏尚无检查点时沿用上一围栏水位（carried）。
+- **落盘与重启一致**：每包三条哈希链（ledger/quarantine/audit，genesis 锚定 packageId）；
+  中途篡改即只读隔离（503），末尾断电残尾原样归档后截断续链；真实进程重启后 `reportDigest`、
+  冲突列表、链尖逐字节一致。
+- **导出只含脱敏证据**：敏感字段名/私钥 PEM/密钥字面量（含自由文本里夹带的 upload secret）递归打码。
+
+详见 [`evidence/README.md`](evidence/README.md)。
 
 ## 重启恢复契约（日志损坏 / 断电残尾）
 

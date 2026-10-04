@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>证据归档与冲突核验 · 现场网关离线作业包</title>
+<style>
+  :root { --bd:#d8dee6; --mut:#6b7280; --ok:#15803d; --warn:#b45309; --err:#b91c1c; --info:#1d4ed8; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; color:#111827; background:#f6f7f9; }
+  header { background:#0f172a; color:#fff; padding:12px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; font-weight:600; }
+  header .hint { color:#94a3b8; font-size:12px; }
+  main { max-width:1180px; margin:18px auto; padding:0 16px; display:grid; gap:16px; }
+  .card { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:14px 16px; }
+  .card h2 { font-size:15px; margin:0 0 10px; }
+  .card h3 { font-size:14px; margin:14px 0 6px; }
+  .card h4 { font-size:13px; margin:12px 0 6px; color:#374151; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  label { font-size:12px; color:var(--mut); }
+  input[type=text],input[type=password],textarea,select {
+    font:inherit; border:1px solid var(--bd); border-radius:6px; padding:6px 8px; background:#fff; width:100%;
+  }
+  textarea { min-height:150px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  button { font:inherit; border:1px solid #94a3b8; background:#f8fafc; border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button.primary { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+  button.danger { border-color:#b91c1c; color:#b91c1c; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  table.grid { width:100%; border-collapse:collapse; font-size:12px; }
+  table.grid th,table.grid td { border:1px solid #e5e7eb; padding:4px 7px; vertical-align:top; text-align:left; }
+  table.grid th { background:#f1f5f9; position:sticky; top:0; }
+  code { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  .tag { display:inline-block; border-radius:99px; padding:1px 9px; font-size:11px; font-weight:600; }
+  .tag.ok { background:#dcfce7; color:var(--ok); } .tag.warn { background:#fef3c7; color:var(--warn); }
+  .tag.err { background:#fee2e2; color:var(--err); } .tag.info { background:#dbeafe; color:var(--info); }
+  .muted { color:var(--mut); font-size:12px; }
+  .mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
+  #toasts { position:fixed; right:14px; bottom:14px; display:grid; gap:8px; z-index:99; }
+  .toast { padding:9px 13px; border-radius:8px; background:#111827; color:#fff; font-size:13px; max-width:420px; box-shadow:0 6px 24px #0004; }
+  .toast.err { background:#7f1d1d; } .toast.ok { background:#14532d; } .toast.warn { background:#78350f; }
+  .pkg-item { border:1px solid var(--bd); border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:pointer; }
+  .pkg-item:hover { border-color:#1d4ed8; }
+  .pkg-item.active { border-color:#1d4ed8; box-shadow:0 0 0 2px #dbeafe inset; }
+  .grid2 { display:grid; grid-template-columns:340px 1fr; gap:16px; align-items:start; }
+  @media (max-width:900px){ .grid2 { grid-template-columns:1fr; } }
+  pre.out { background:#0b1220; color:#d1e0ff; padding:10px; border-radius:8px; font-size:11px; overflow:auto; max-height:300px; }
+  .secret-note { font-size:11px; color:var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>证据归档与冲突核验</h1>
+  <span class="hint">现场网关离线作业包 · 规范化签名 + 哈希链 · 旧围栏证据可查不充当进度</span>
+</header>
+<main>
+  <section class="card">
+    <h2>① 导入凭据（upload secret 仅存于浏览器内存并通过请求头发送，永不写入页面内容/日志）</h2>
+    <div class="row">
+      <div style="flex:1;min-width:260px">
+        <label>X-Upload-Secret</label>
+        <input id="secret" type="password" placeholder="从 data/evidence/upload-secret.json 获取（权限 0600）" autocomplete="off">
+      </div>
+      <div style="align-self:flex-end">
+        <button id="btnSaveSecret">仅保存在内存</button>
+      </div>
+      <div id="secretState" style="align-self:flex-end" class="muted">未设置</div>
+    </div>
+    <div class="secret-note">提示：刷新页面后需要重新输入；本页任何输出都会检查并确认不包含该字符串。</div>
+  </section>
+
+  <section class="card">
+    <h2>② 网关注册（登记公钥；服务从不接收私钥）</h2>
+    <div class="row">
+      <div style="flex:1"><label>gatewayId</label><input id="gwId" type="text" placeholder="gateway-A"></div>
+      <div style="flex:1"><label>keyId</label><input id="gwKeyId" type="text" placeholder="gw-key-1"></div>
+      <div style="flex:2"><label>公钥 PEM（SPKI）</label><input id="gwPub" type="text" placeholder="-----BEGIN PUBLIC KEY-----..."></div>
+      <div style="align-self:flex-end"><button class="primary" id="btnRegGw">登记</button></div>
+    </div>
+    <div id="gwList" class="muted" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
+    <h2>③ 导入带签名证据包</h2>
+    <textarea id="envelope" placeholder='粘贴证据信封 JSON：{ schema:"offline-evidence/1", packageId, gatewayId, keyId, records:[...], envelopeHash, signature }&#10;可用 scripts/evidence-demo.mjs --print 生成示例信封'></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" id="btnImport">校验并导入</button>
+      <button id="btnFormat">格式化</button>
+      <span id="importState" class="muted"></span>
+    </div>
+    <h4>最近裁决</h4>
+    <pre id="importResult" class="out">（尚未导入）</pre>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>④ 已归档作业包</h2>
+      <div class="row" style="margin-bottom:8px">
+        <button id="btnRefresh">刷新</button>
+        <button id="btnVerify">核验全部哈希链</button>
+        <button class="danger" id="btnRestart" title="丢弃内存投影并从磁盘重放（等价进程重启）">模拟重启重放</button>
+      </div>
+      <div id="pkgList"></div>
+      <pre id="verifyOut" class="out" style="margin-top:8px"></pre>
+    </section>
+
+    <section class="card" id="detailCard">
+      <h2>⑤ 核验报告</h2>
+      <div id="detail" class="muted">选择左侧作业包查看报告。</div>
+    </section>
+  </div>
+</main>
+<div id="toasts"></div>
+<script src="/app.js"></script>
+</body>
+</html>
